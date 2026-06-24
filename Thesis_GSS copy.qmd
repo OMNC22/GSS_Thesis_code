@@ -1,0 +1,748 @@
+---
+title: "Thesis_GSS"
+---
+
+# Research question:
+
+How do physicochemical indicators of soil alter between forests, peatland, grassland in the Netherlands?
+
+Furthermore, what is the relationship between vegetation characteristics that occur in each habitat and the respective physicochemical indicators?  
+
+# Data analysis setup:
+
+## Installing packages
+
+```{r}
+install.packages("rstatix")
+install.packages("metan")
+install.packages("Hmsic")
+install.packages("emmeans")
+install.packages("ggpubr")
+install.packages("cowplot")
+
+```
+
+## Library
+
+```{library(knitr)}
+library(dunn.test)
+library(corrplot)
+library(ggcorrplot)
+library(ggplot2)
+library(rstatix)
+library(readxl)
+library(dplyr)
+library(psych)
+library(vegan)
+library(car)
+library(emmeans)
+library(reshape2)
+library(ggpubr)
+library(cowplot)
+library(gridGraphics)
+
+```
+
+## Loading data
+
+```{r}
+soil_health_data<-read_xlsx("Thesis_Soil-health_Raw-data .xlsx")
+vegitation_data<-read_xlsx("Thesis_Vegitation_charactersitics.xlsx")
+peat_cor_data<-read_xlsx("Soil_peat_data.xlsx")
+forest_cor_data<-read_xlsx("Soil_forest_data.xlsx")
+grass_cor_data<-read_xlsx("Soil_grass_data.xlsx")
+all_cor_data<-read_xlsx("Soil_all_data.xlsx")
+```
+
+## Vegetation data preparation
+
+```{r}
+vegitation_data<-vegitation_data |> 
+  filter(Species != "Litter")
+
+veg_join_data <- vegitation_data |> 
+  group_by(Site,Plot, Species) |> 
+  summarise(Avg_cover=mean(Coverage)) |>
+  mutate(Site = as.factor(Site)) |> 
+  pivot_wider(names_from = Species,
+              values_from = Avg_cover,
+              values_fill = 0) |> 
+  mutate(Total = sum(c_across("Anthoxanthum Odoxathum":"Vicia"))) |> 
+  pivot_longer(cols ="Anthoxanthum Odoxathum":"Vicia",
+               names_to = "Plant_species", 
+               values_to = "Abundance") |> 
+  filter(Abundance>0) |> 
+  mutate(Rel_abundance = Abundance/Total) |> 
+  group_by(Site, Plot) |> 
+  summarise(q0=sum(Rel_abundance^0)^(1/(1-0)),
+            q1=exp(-sum(Rel_abundance*log(Rel_abundance))), 
+            q2= sum(Rel_abundance^2)^(1/(1-2)))
+```
+
+# Generalized linear model
+
+## Vegetation characteristics
+
+### fitting a GLM to vegetation characteristics
+
+```{r}
+
+levels(veg_join_data$Site)<- c("Peatland", "Forest", "Grassland")
+veg_join_data<- veg_join_data |> 
+rename(Habitat_type = Site)
+
+q0_glm<-glm(q0~Habitat_type, 
+            data = veg_join_data, 
+            family = quasipoisson(link = "log"))
+
+veg_join_data$q0_residuals <- residuals(q0_glm)
+veg_join_data$q0_fitted <- fitted(q0_glm)
+
+ggplot(veg_join_data, aes(x = q0_fitted,
+                 y = q0_residuals)) +   
+    geom_point() +    
+    geom_hline(yintercept = 0,              
+               linetype = "dashed")+ 
+    theme_bw() +   
+    xlab("Fitted values")+   
+    ylab("Residuals")+   
+    ggtitle("Residual plot") 
+
+summary(q0_glm)
+null_deviance <- summary(q0_glm)$null.deviance
+residual_deviance <- summary(q0_glm)$deviance
+
+100*(null_deviance-residual_deviance)/null_deviance
+
+Anova(q0_glm)
+
+summary(emmeans(object = q0_glm, 
+                         specs = "Site", 
+                         contr = "pairwise"), 
+         type="response")
+
+plant_mean<- plant_data |>  group_by(Site) |> 
+  summarise(mean_q0 = mean(q0),
+            mean_q1= mean(q2),
+            mean_q2= mean(q1))
+  
+#--------------------------------------Simpsons Diversity--------------------------------#
+q1_glm<-glm(q1~Habitat_type, 
+            data = veg_join_data, 
+            family = Gamma(link = "log"))
+
+veg_join_data$q1_resdiuals <- residuals(q1_glm)
+veg_join_data$q1_fitted <- fitted(q1_glm)
+
+ggplot(veg_join_data, aes(x = q1_fitted,
+                 y = q1_residuals)) +   
+    geom_point() +    
+    geom_hline(yintercept = 0,              
+               linetype = "dashed")+ 
+    theme_bw() +   
+    xlab("Fitted values")+   
+    ylab("Residuals")+   
+    ggtitle("Residual plot") 
+
+summary(q1_glm)
+null_deviance <- summary(q1_glm)$null.deviance
+residual_deviance <- summary(q1_glm)$deviance
+
+100*(null_deviance-residual_deviance)/null_deviance
+
+Anova(q1_glm)
+
+summary(emmeans(object = q1_glm, 
+                         specs = "Site", 
+                         contr = "pairwise"), 
+         type="response")
+
+
+#-----------------------------------------Simpsons diversity ----------------------------#
+q2_glm<-glm(q2~Habitat_type, 
+            data = veg_join_data, 
+            family = Gamma(link = "log"))
+
+veg_join_data$q2_resdiuals <- residuals(q2_glm)
+veg_join_data$q2_fitted <- fitted(q2_glm)
+
+ggplot(veg_join_data, aes(x = q2_fitted,
+                 y = q2_residuals)) +   
+    geom_point() +    
+    geom_hline(yintercept = 0,              
+               linetype = "dashed")+ 
+    theme_bw() +   
+    xlab("Fitted values")+   
+    ylab("Residuals")+   
+    ggtitle("Residual plot") 
+
+summary(q2_glm)
+null_deviance <- summary(q2_glm)$null.deviance
+residual_deviance <- summary(q2_glm)$deviance
+
+100*(null_deviance-residual_deviance)/null_deviance
+
+Anova(q2_glm)
+
+summary(emmeans(object = q2_glm, 
+                         specs = "Site", 
+                         contr = "pairwise"), 
+         type="response")
+  
+```
+
+### Plotting vegetation characteristics data
+
+```{r}
+
+levels(veg_data_hill$Site)<- c("Peatland", "Forest", "Grassland")
+
+veg_post_hoc <- data.frame(
+  Site = rep(c("Peatland", "Forest", "Grassland"), 3),
+  q = rep(c(0, 1, 2), each = 3),
+  y = c(rep(12, 3),
+        rep(8, 3),
+        rep(6, 3)),
+  Label = c("a", "b", "a",
+            "a", "b", "a",
+            "ab", "b", "a"))
+
+veg_plot<-ggplot(veg_data_hill,
+       aes(x=Habitat_type, 
+           y=diversity, color=Habitat_type))+
+  scale_color_manual(values = c("#365D8DFF","#20A486FF","red"))+
+  geom_jitter(shape = 15, 
+              alpha = 0.75,
+              height = 0, 
+              width = 0.2)+
+  stat_summary(fun.data = "mean_cl_boot")+
+  theme_bw()+
+  xlab("")+
+  ylab("Effective number of species")+
+  facet_wrap(~q, ncol=3)+
+  theme(axis.text.x=element_text(angle = 45,
+                                 vjust = 1,
+                                 hjust = 1))+
+   theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))+
+  geom_text(data=veg_post_hoc,
+            aes(y=y,
+                x=Site,
+                label=Label),
+            color="black")+
+  ggtitle("Vegetation diversity across three habitat types for each hill number")+
+  theme(plot.title = element_text(size = 10))
+
+ggsave(filename = "veg_plot.png",
+       plot = veg_plot,
+       dpi = 1000,
+       width = 20,
+       height=12,
+       units="cm")
+
+
+  
+```
+
+## Chemical characteristics
+
+### fitting a GLM to chemical characteristics
+
+```{r}
+
+#-------------------------------------------pH----------------------------------------------#
+soil_health_fixed <- soil_health_data |> 
+  rename(Habitat_type = Site) |> 
+  rename(Soil_depth = `Soil depth`)
+
+
+soil_health_fixed$Habitat_type<-as.factor(soil_health_fixed$Habitat_type)
+soil_health_fixed$Soil_depth<-as.factor(soil_health_fixed$Soil_depth)
+
+levels(soil_health_fixed$Habitat_type)<- c("Peatland", "Forest", "Grassland")
+
+
+
+pH_glm<-glm(pH~Habitat_type*Soil_depth, 
+            data = soil_health_fixed, 
+            family = Gamma(link = "log"))
+
+pH_EMM<-emmeans(pH_glm,~Site*Soil_depth)
+
+summary(pH_EMM)
+pairs(pH_EMM)
+summary(pH_glm)
+
+
+null_deviance <- summary(pH_glm)$null.deviance
+residual_deviance <- summary(pH_glm)$deviance
+
+100*(null_deviance-residual_deviance)/null_deviance
+
+Anova(pH_glm)
+
+
+#-------------------------------------------EC----------------------------------------------#
+EC_glm<-glm(EC~Habitat_type*Soil_depth, 
+            data = soil_health_fixed, 
+            family = Gamma(link = "log"))
+
+EC_EMM<-emmeans(EC_glm,~Habitat_type*Soil_depth)
+
+summary(EC_glm)
+summary(EC_EMM)
+pairs(EC_EMM)
+
+
+
+null_deviance <- summary(EC_glm)$null.deviance
+residual_deviance <- summary(EC_glm)$deviance
+
+100*(null_deviance-residual_deviance)/null_deviance
+
+Anova(EC_glm)
+
+
+```
+
+### Plotting chemical characteristics from GLM
+
+```{r}
+
+##-----------Plotting the relationship of soil EC, soil depth and habitat type----------##
+pH_post_hoc <- data.frame(
+  Habitat_type = rep(c("Peatland", "Forest", "Grassland"), 2),
+  Soil_depth = rep(c("0-15 cm","15-30 cm" ), each = 3),
+  y = c(rep(8, 3),
+        rep(8, 3)),
+  Label = c("a,A", "b,A", "a,A",
+            "a,A","b,A","a,A"))
+
+ggplot(soil_health_fixed, 
+       aes(x = Habitat_type, y= pH, fill= Habitat_type))+ 
+  xlab("")+
+  ylab("Soil pH")+
+  theme_bw()+
+  facet_wrap(~Soil_depth)+
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))+
+  geom_boxplot()+
+  scale_fill_manual(values = c("#365D8DFF","#20A486FF","red"))+
+  geom_text(data=pH_post_hoc,
+            aes(y=y,
+                x=Habitat_type,
+                label=Label),
+            color="black")+
+  ggtitle("Soil pH across soil depths and habitat type across Noorder park")+
+    theme(plot.title = element_text(size = 10))
+
+ggsave(filename = "pH_plot.png",
+       plot = pH_plot,
+       dpi = 1000,
+       width = 20,
+       height=12,
+       units="cm")
+
+
+
+##-----------Plotting the relationship of soil EC, soil depth and habitat type----------##
+
+EC_post_hoc <- data.frame(
+  Habitat_type = rep(c("Peatland", "Forest", "Grassland"), 2),
+  Soil_depth = rep(c("0-15 cm","15-30 cm" ), each = 3),
+  y = c(rep(400, 3),
+        rep(500, 3)),
+  Label = c("a,A", "a,A", "a,A",
+            "a,A","a,A","a,A"))
+
+EC_plot<-ggplot(soil_health_fixed, 
+       aes(x = Habitat_type, y= EC, fill= Habitat_type)) + 
+  xlab("")+
+  ylab("Electrical conductivity μS/cm")+
+  theme_bw()+
+  facet_wrap(~Soil_depth)+
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))+
+  geom_boxplot()+
+  scale_fill_manual(values = c("#365D8DFF","#20A486FF","red"))+
+  geom_text(data=EC_post_hoc,
+            aes(y=y,
+                x=Habitat_type,
+                label=Label),
+            color="black")+
+  ggtitle("Soil electrical conductivity across soil depths and habitat types in Noorder park")+
+    theme(plot.title = element_text(size = 10))
+
+ggsave(filename = "EC_plot.png",
+       plot = EC_plot,
+       dpi = 1000,
+       width = 20,
+       height=12,
+       units="cm")
+
+
+```
+
+## Physical characteristics
+
+### fitting a GLM to physical characteristics
+
+```{r}
+
+#--------------------------------------------Bulk density---------------------------------#
+soil_health_fixed <- soil_health_fixed|> 
+  rename(Bulk_density = `Bulk density`)
+
+Bulk_glm<-glm(Bulk_density~Habitat_type*Soil_depth, 
+            data = soil_health_fixed, 
+            family = Gamma(link = "log"))
+
+Bulk_EMM<-emmeans(Bulk_glm,~Habitat_type*Soil_depth)
+
+summary(Bulk_EMM)
+pairs(Bulk_EMM)
+
+null_deviance <- summary(EC_glm)$null.deviance
+residual_deviance <- summary(EC_glm)$deviance
+
+100*(null_deviance-residual_deviance)/null_deviance
+
+
+#--------------------------------------------Soil moisture---------------------------------#
+
+
+soil_health_fixed <- soil_health_fixed|> 
+  rename(Soil_moisture= `Soil moisture`)
+
+moist_glm<-glm(Soil_moisture~Habitat_type*Soil_depth, 
+            data = soil_health_fixed, 
+            family = Gamma(link = "log"))
+
+moist_EMM<-emmeans(moist_glm,~Habitat_type*Soil_depth)
+
+summary(moist_EMM)
+pairs(moist_EMM)
+
+
+
+null_deviance <- summary(EC_glm)$null.deviance
+residual_deviance <- summary(EC_glm)$deviance
+
+100*(null_deviance-residual_deviance)/null_deviance
+
+
+
+#---------------------------------------Hydrophobicity----------------------------------------#
+
+soil_health_fixed <- soil_health_fixed|> 
+  rename(Hydrophobicity= `Water repellency  time(secs`) 
+
+hydro_glm<-glm(Hydrophobicity~Habitat_type*Soil_depth, 
+            data = soil_health_fixed, 
+            family = Gamma(link = "log"))
+
+hydro_EMM<-emmeans(hydro_glm,~Habitat_type*Soil_depth)
+
+summary(hydro_EMM)
+pairs(hydro_EMM)
+
+null_deviance <- summary(EC_glm)$null.deviance
+residual_deviance <- summary(EC_glm)$deviance
+
+100*(null_deviance-residual_deviance)/null_deviance
+```
+
+------------------------------------------------------------------------
+
+### Plotting physical characteristics
+
+```{r}
+#-----------------------------------------Soil bulk density---------------------------------#
+bulk_post_hoc <- data.frame(
+  Habitat_type = rep(c("Peatland", "Forest", "Grassland"), 2),
+  Soil_depth = rep(c("0-15 cm","15-30 cm"), each = 3),
+  y = c(rep(8, 3),
+        rep(8, 3)),
+  Label = c("a,A", "a,A", "a,A",
+            "a,A","a,A","a,A"))
+
+
+bulk_plot<-ggplot(soil_health_fixed, 
+       aes(x = Habitat_type, y= Bulk_density, fill= Habitat_type)) + 
+  xlab("")+
+  ylab("Soil Bulk density (g/cm^3)")+
+  theme_bw()+
+  facet_wrap(~Soil_depth)+
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))+
+  geom_boxplot()+
+  scale_fill_manual(values = c("#365D8DFF","#20A486FF","red"))+
+  geom_text(data=bulk_post_hoc,
+            aes(y=y,
+                x=Habitat_type,
+                label=Label),
+            color="black")+
+  ggtitle("Soil bulk density across soil depths and habitat type in Noorder park")+
+    theme(plot.title = element_text(size = 10))
+
+ggsave(filename = "bulk_plot.png",
+       plot = bulk_plot,
+       dpi = 1000,
+       width = 20,
+       height=12,
+       units="cm")
+
+  
+
+levels(soil_health_fixed$Site)
+#---------------------------------------------Soil moisture---------------------------------#
+
+moist_post_hoc <- data.frame(
+  Habitat_type = rep(c("Peatland", "Forest", "Grassland"), 2),
+  Soil_depth = rep(c("0-15 cm","15-30 cm" ), each = 3),
+  y = c(rep(40, 3),
+        rep(46, 3)),
+  Label = c("a,A", "a,A", "a,A",
+            "a,A","a,A","a,A"))
+
+
+moist_plot<-ggplot(soil_health_fixed, 
+       aes(x =Habitat_type, y=Soil_moisture, fill=Habitat_type)) + 
+  xlab("")+
+  ylab("Soil moisture content (%)")+
+  theme_bw()+
+  facet_wrap(~Soil_depth)+
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))+
+  geom_boxplot()+
+  scale_fill_manual(values = c("#365D8DFF","#20A486FF","red"))+
+  geom_text(data=moist_post_hoc,
+            aes(y=y,
+                x=Habitat_type,
+                label=Label),
+            color="black")+
+  ggtitle("Soil moisture content across soil depths and habitat types in Noorder park")+
+    theme(plot.title = element_text(size = 10))
+
+
+
+ggsave(filename = "moist_plot.png",
+       plot = moist_plot,
+       dpi = 1000,
+       width = 20,
+       height=12,
+       units="cm")
+
+
+#---------------------------------------------Hydrophobicity---------------------------------#
+hydro_post_hoc <- data.frame(
+  Habitat_type = rep(c("Peatland", "Forest", "Grassland"), 2),
+  Soil_depth = rep(c("0-15 cm","15-30 cm" ), each = 3),
+  y = c(rep(610, 3),
+        rep(300, 3)),
+  Label = c("a,A", "b,A", "a,A",
+            "a,A","b,A","a,A"))
+
+
+hydro_plot<-ggplot(soil_health_fixed, 
+       aes(x = Habitat_type, y= Hydrophobicity, fill= Habitat_type)) + 
+  xlab("")+
+  ylab("Water repellency time (secs)")+
+  theme_bw()+
+  facet_wrap(~Soil_depth)+
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))+
+  geom_boxplot()+
+  scale_fill_manual(values = c("#365D8DFF","#20A486FF","red"))+
+  geom_text(data=hydro_post_hoc,
+            aes(y=y,
+                x=Habitat_type,
+                label=Label),
+            color="black")+
+  ggtitle("Soil hydrophobicity across soil depths and habitat type in Noorder park")+
+  theme(plot.title = element_text(size = 10))
+
+ggsave(filename = "hydro_plot.png",
+       plot = hydro_plot,
+       dpi = 1000,
+       width = 20,
+       height=12,
+       units="cm")
+
+
+
+```
+
+# Correlation Matrices
+
+```{r}
+#--------------------------------------------Peatland-----------------------------------------#
+data_p<-peat_cor_data
+peat_mat<-cor(data_p, use = "pairwise.complete.obs")
+cor_peat_mat<-corr.test(data_p)$p
+
+
+ peat<-corrplot(peat_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 0.5,
+         p.mat = cor_peat_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+         na.label="square",
+         na.label.col = "white")
+ 
+ 
+peat<-ggcorrplot(peat_mat,
+            p.mat=cor_peat_mat,
+            type = "lower",
+            insig = "pch",
+            lab=TRUE)
+
+#--------------------------------------------Forest------------------------------------------#
+data_f<-forest_cor_data
+forest_mat<-cor(data_f)
+cor_forest_mat<-corr.test(data_f)$p
+
+
+forest<-corrplot(forest_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 0.5,
+         p.mat = cor_forest_mat,
+         insig="pch",
+         col = c("brown","lightblue"))
+
+
+forest<-ggcorrplot(forest_mat,
+            p.mat=cor_forest_mat,
+            type = "lower",
+            insig = "pch",
+            lab=TRUE)
+
+#----------------------------------------Grassland-------------------------------------------#
+data_g<-grass_cor_data
+grass_mat<-cor(data_g)
+cor_grass_mat<-corr.test(data_g)$p
+
+
+grass<-corrplot(grass_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 0.5,
+         p.mat = cor_grass_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+         na.label = "square")
+
+grass<-ggcorrplot(grass_mat,
+            p.mat=cor_grass_mat,
+            type = "lower",
+            insig = "pch",
+            lab=TRUE)
+#----------------------------------------------All data-------------------------------------#
+data_all<-all_cor_data
+all_mat<-cor(data_all)
+cor_all_mat<-corr.test(data_all)$p
+
+
+all<-corrplot(all_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 0.5,
+         p.mat = cor_all_mat,
+         insig="pch",
+         col = c("brown","lightblue"))
+
+all<-ggcorrplot(all_mat,
+            p.mat=cor_all_mat,
+            type = "lower",
+            insig = "pch",
+            lab=TRUE)
+#--------------------------------------Putting plots together---------------------------------#
+pdf("final.pdf", width = 18, height = 18)
+par(mfrow=c(2,2), oma = c(0, 0, 3, 0))
+corrplot(all_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 1.5,
+         p.mat = cor_all_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+         main= "A", cex.main =2, mar = c(0, 0, 2, 0))
+corrplot(peat_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 1.5,
+         p.mat = cor_peat_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+         na.label="square",
+         na.label.col = "white",
+         main = "B", cex.main =2, mar = c(0, 0, 2, 0))
+corrplot(forest_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 1.5,
+         p.mat = cor_forest_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+         main = "C", cex.main =2, mar = c(0, 0, 2, 0))
+corrplot(grass_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 1.5,
+         p.mat = cor_grass_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+         main = "D", cex.main =2, mar = c(0, 0, 2, 0))
+mtext("Correlation matrices of soil health and species richnes for each habitat indivdiually and combined ", outer = TRUE, cex = 2, line = 0.5)
+
+
+
+pdf("final.pdf", width = 16, height = 14)
+grid <-matrix(c(1,1,1,
+                2,3,4), nrow = 2, ncol =3, byrow=TRUE)
+layout(grid)
+corrplot(all_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 1.5,
+         p.mat = cor_all_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+         main = "A",  cex.main =2, mar = c(0, 0, 2, 0))
+corrplot(peat_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 1.5,
+         p.mat = cor_peat_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+         na.label="square",
+         na.label.col = "white",
+          main = "B", cex.main =2, mar = c(0, 0, 2, 0))
+corrplot(forest_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 1.5,
+         p.mat = cor_forest_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+          main = "C", cex.main =2, mar = c(0, 0, 2, 0))
+corrplot(grass_mat,
+         order = "original",
+         type = "lower",
+         tl.col = "black",
+         tl.cex = 1.5,
+         p.mat = cor_grass_mat,
+         insig="pch",
+         col = c("brown","lightblue"),
+          main = "D", cex.main =2, mar = c(0, 0, 2, 0))
+mtext("Correlation matrices of the relationship soil health and species richnes for each habitat indivdiually and combined ", outer = TRUE, cex = 2, line = 0.5)
+```
