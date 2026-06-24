@@ -126,7 +126,7 @@ plant_mean<- plant_data |>  group_by(Site) |>
             mean_q1= mean(q2),
             mean_q2= mean(q1))
   
-#--------------------------------------Simpsons Diversity--------------------------------#
+#--------------------------------------Shannons Diversity--------------------------------#
 q1_glm<-glm(q1~Habitat_type, 
             data = veg_join_data, 
             family = Gamma(link = "log"))
